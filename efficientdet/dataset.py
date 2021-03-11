@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from pycocotools.coco import COCO
 import cv2
 
@@ -15,9 +15,35 @@ class CocoDataset(Dataset):
         self.transform = transform
 
         self.coco = COCO(os.path.join(self.root_dir, 'annotations', 'instances_' + self.set_name + '.json'))
-        self.image_ids = self.coco.getImgIds()
+        self.image_ids = self.get_image_ids()
 
         self.load_classes()
+
+    def get_image_ids(self):
+        result_ids = set()
+        annot_imgs = self.coco.imgs
+        # imgs_path = os.path.join(self.root_dir, self.set_name, 'thermal_8_bit')
+        imgs_path = os.path.join(self.root_dir, self.set_name)
+        real_names = os.listdir(imgs_path)
+        suffix = '.' + real_names[0].split('.')[-1]
+        names_dict = {}
+
+        for i, img in (enumerate(annot_imgs.values())):
+            id_ = img['id']
+            name = img['file_name']
+            name = os.path.basename(name)
+            name = name.split('.')[0]
+            name += suffix
+            names_dict[id_] = name
+
+        anns = self.coco.anns
+        for ant in anns.values():
+            id = ant['image_id']
+            # name = os.path.join(images_dir_path, images[id]['file_name'])
+            if not (names_dict[id] in real_names):
+                continue
+            result_ids.add(id)
+        return list(result_ids)
 
     def load_classes(self):
 

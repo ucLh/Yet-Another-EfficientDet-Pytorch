@@ -44,7 +44,7 @@ def get_args():
     parser.add_argument('--optim', type=str, default='adamw', help='select optimizer for training, '
                                                                    'suggest using \'admaw\' until the'
                                                                    ' very final stage then switch to \'sgd\'')
-    parser.add_argument('--num_epochs', type=int, default=500)
+    parser.add_argument('--num_epochs', type=int, default=50)
     parser.add_argument('--val_interval', type=int, default=1, help='Number of epoches between valing phases')
     parser.add_argument('--save_interval', type=int, default=500, help='Number of steps between saving')
     parser.add_argument('--es_min_delta', type=float, default=0.0,
@@ -195,6 +195,7 @@ def train(opt):
     epoch = 0
     best_loss = 1e5
     best_epoch = 0
+    accumulation_steps = 32 // opt.batch_size
     step = max(0, last_step)
     model.train()
 
@@ -208,6 +209,7 @@ def train(opt):
 
             epoch_loss = []
             progress_bar = tqdm(training_generator)
+            optimizer.zero_grad()
             for iter, data in enumerate(progress_bar):
                 if iter < step - last_epoch * num_iter_per_epoch:
                     progress_bar.update()
@@ -222,26 +224,30 @@ def train(opt):
                         imgs = imgs.cuda()
                         annot = annot.cuda()
 
-                    optimizer.zero_grad()
+                    # optimizer.zero_grad()
                     cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
                     cls_loss = cls_loss.mean()
                     reg_loss = reg_loss.mean()
 
                     loss = cls_loss + reg_loss
+                    loss /= accumulation_steps
                     if loss == 0 or not torch.isfinite(loss):
                         continue
 
                     loss.backward()
                     # torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
-                    optimizer.step()
+                    if (iter + 1) % accumulation_steps == 0:
+                        optimizer.step()
+                        optimizer.zero_grad()
+                    # optimizer.step()
 
                     epoch_loss.append(float(loss))
 
                     progress_bar.set_description(
                         'Step: {}. Epoch: {}/{}. Iteration: {}/{}. Cls loss: {:.5f}. Reg loss: {:.5f}. Total loss: {:.5f}'.format(
                             step, epoch, opt.num_epochs, iter + 1, num_iter_per_epoch, cls_loss.item(),
-                            reg_loss.item(), loss.item()))
-                    writer.add_scalars('Loss', {'train': loss}, step)
+                            reg_loss.item(), loss.item() * accumulation_steps))
+                    writer.add_scalars('Loss', {'train': loss * accumulation_steps}, step)
                     writer.add_scalars('Regression_loss', {'train': reg_loss}, step)
                     writer.add_scalars('Classfication_loss', {'train': cls_loss}, step)
 

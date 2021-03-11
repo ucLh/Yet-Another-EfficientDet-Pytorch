@@ -2,28 +2,42 @@
 
 The pytorch re-implement of the official [EfficientDet](https://github.com/google/automl/tree/master/efficientdet) with SOTA performance in real time, original paper link: <https://arxiv.org/abs/1911.09070>
 
-## Having troubles training? I might train it for you
+## Custom updates
 
-If you have troubles training a dataset, and if you are willing to share your dataset with the public or it's open already, post it on Issues with `help wanted` tag, I might try to help train it for you, if I'm free, which is not guaranteed.
+### 1. Evaluation
 
-Requirements:
+    # eval on detection_dataset
+    # If you are using models with 'pretrain' suffix, pass `--use_coco_classes` flag.
+    python coco_eval.py -p detection_dataset -c 0 \
+    --weights weights/efficientdet-d0_original_pretrain.pth \
+    --use_coco_classes
+    
+    # if not, don't pass `--use_coco_classes` flag
+    python coco_eval.py -p detection_dataset -c 0 \
+    --weights weights/efficientdet-d0_original_from_zero.pth
+    
+    # You can use eval.sh script to evaluate all the models for the task.
+    
+### 2. Visualisation
 
-1. The total number of the image of the dataset should not be larger than 10K, capacity should be under 5GB, and it should be free to download, i.e. baiduyun.
-
-2. The dataset should be in the format of this repo.
-
-3. If you post your dataset in this repo, it is open to the world. So PLEASE DO NOT upload your confidential datasets!
-
-4. If the datasets are against the law or invade one's privacy, feel free to contact me to delete it.
-
-5. Most importantly, you can't demand me to train unless I wanted to.
-
-I'll post the trained weights in this repo along with the evaluation result.
-
-Hope it help whoever wants to try efficientdet in pytorch.
-
-Training examples can be found here. [tutorials](tutorial/). The trained weights can be found here. [weights](https://github.com/zylo117/Yet-Another-EfficientDet-Pytorch/releases/tag/custom_datasets)
-
+    # to visualise result you must first run coco_eval.py, it will produce test_bbox_results.json
+    # you need to pass this json file to a visualise script using `--model_preds` flag.
+    
+    python visualize_predictions.py \
+    --model_preds test_bbox_results.json \
+    --dataset_dir datasets/detection_dataset/test \
+    --gt_annotations datasets/detection_dataset/annotations/instances_test.json \
+    --output_dir preds/test
+    
+    # you can also use visualise.sh script.
+    
+### 3. Modifications
+    
+    I've added a custom `get_image_ids()` function to `efficientdet/dataset.py` that
+    returns only ids of images that have objects in them.
+    
+    I've also added batch accumulation in the `train.py` and script to convert original 
+    csv annotations to coco format that is required by this repository.
 
 ## Performance
 
@@ -93,7 +107,7 @@ The speed/FPS test includes the time of post-processing with no jit/data precisi
 
 Training EfficientDet is a painful and time-consuming task. You shouldn't expect to get a good result within a day or two. Please be patient.
 
-Check out this [tutorial](tutorial/) if you are new to this. You can run it on colab with GPU support.
+Check out this [tutorial](tutorial/train_shape.ipynb) if you are new to this. You can run it on colab with GPU support.
 
 ### 1. Prepare your dataset
 
