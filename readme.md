@@ -46,7 +46,7 @@ The pytorch re-implement of the official [EfficientDet](https://github.com/googl
     --input_dir datasets/detection_dataset/test \
     --save_dir preds/original_from_zero
     
-### 3. Modifications
+### 4. Modifications
     
     I've added a custom `get_image_ids()` function to `efficientdet/dataset.py` that
     returns only ids of images that have objects in them.
@@ -54,7 +54,7 @@ The pytorch re-implement of the official [EfficientDet](https://github.com/googl
     I've also added batch accumulation in the `train.py` and script to convert original 
     csv annotations to coco format that is required by this repository.
 
-### 4. Training
+### 5. Training
     
 #### 0. Obtain coco-style annotations
 
