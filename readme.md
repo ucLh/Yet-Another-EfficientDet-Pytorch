@@ -31,6 +31,21 @@ The pytorch re-implement of the official [EfficientDet](https://github.com/googl
     
     # you can also use visualise.sh script.
     
+### 3. Inference
+
+    # is similar to coco evaluation
+    # don't forget about '--use_coco_classes' for models with 'pretrain' suffix
+    python inference.py -p detection_dataset -c 0 \
+    --weights weights/efficientdet-d0_original_pretrain.pth \
+    --input_dir datasets/detection_dataset/test \
+    --save_dir preds/original_pretrain \
+    --use_coco_classes
+    
+    python inference.py -p detection_dataset -c 0 \
+    --weights weights/efficientdet-d0_original_from_zero.pth \
+    --input_dir datasets/detection_dataset/test \
+    --save_dir preds/original_from_zero
+    
 ### 3. Modifications
     
     I've added a custom `get_image_ids()` function to `efficientdet/dataset.py` that
@@ -38,6 +53,103 @@ The pytorch re-implement of the official [EfficientDet](https://github.com/googl
     
     I've also added batch accumulation in the `train.py` and script to convert original 
     csv annotations to coco format that is required by this repository.
+
+### 4. Training
+    
+#### 0. Obtain coco-style annotations
+
+    python create_coco_annotations.py --image_dir datasets/detection_dataset/train \
+    --csv_annotations datasets/detection_dataset/train_bbox.csv \
+    --output_file datasets/detection_dataset/annotations/instances_train.json
+
+#### 1. Prepare your dataset
+
+    # your dataset structure should be like this
+    datasets/
+        -your_project_name/
+            -train_set_name/
+                -*.jpg
+            -val_set_name/
+                -*.jpg
+            -annotations
+                -instances_{train_set_name}.json
+                -instances_{val_set_name}.json
+    
+    # for example, coco2017
+    datasets/
+        -coco2017/
+            -train2017/
+                -000000000001.jpg
+                -000000000002.jpg
+                -000000000003.jpg
+            -val2017/
+                -000000000004.jpg
+                -000000000005.jpg
+                -000000000006.jpg
+            -annotations
+                -instances_train2017.json
+                -instances_val2017.json
+
+#### 2. Manual set project's specific parameters
+
+Note that there is a ready [parameters file](projects/detection_dataset.yml) used for the task
+
+    # create a yml file {your_project_name}.yml under 'projects'folder 
+    # modify it following 'coco.yml'
+     
+    # for example
+    project_name: coco
+    train_set: train2017
+    val_set: val2017
+    num_gpus: 4  # 0 means using cpu, 1-N means using gpus 
+    
+    # mean and std in RGB order, actually this part should remain unchanged as long as your dataset is similar to coco.
+    mean: [0.485, 0.456, 0.406]
+    std: [0.229, 0.224, 0.225]
+    
+    # this is coco anchors, change it if necessary
+    anchors_scales: '[2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]'
+    anchors_ratios: '[(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]'
+    
+    # objects from all labels from your dataset with the order from your annotations.
+    # its index must match your dataset's category_id.
+    # category_id is one_indexed,
+    # for example, index of 'car' here is 2, while category_id of is 3
+    # Don't change the category_id of car. Json annotations from step 0 depend on it
+    obj_list: ['', '', 'car']
+    # Object list for coco dataset 
+    obj_list_coco: ['person', 'bicycle', 'car', ...]
+
+#### 3. Actually train
+
+    # train efficientdet-d0 on a custom dataset from scratch
+    # with batchsize 8 and learning rate 1e-3 for 10 epoches
+    python train.py -c 0 -p detection_dataset --batch_size 8 --lr 1e-3 --num_epochs 10
+
+    # from pretrained weights from original repo (you can get one via link from perfomance table)
+    python train.py -c 2 -p detection_dataset --batch_size 8 --lr 1e-3 --num_epochs 10 \
+     --load_weights /path/to/your/weights/efficientdet-d2.pth --use_coco_classes
+
+#### 4. Early stopping a training session
+
+    # while training, press Ctrl+c, the program will catch KeyboardInterrupt
+    # and stop training, save current checkpoint.
+
+#### 5. Resume training
+
+    # let say you started a training session like this.
+    
+    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 \
+     --load_weights /path/to/your/weights/efficientdet-d2.pth
+     
+    # then you stopped it with a Ctrl+c, it exited with a checkpoint
+    
+    # now you want to resume training from the last checkpoint
+    # simply set load_weights to 'last'
+    # Don't forget '--use_coco_classes' flag if you've started training from pretrained weights
+    
+    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 \
+     --load_weights last
 
 ## Performance
 
@@ -102,140 +214,6 @@ The speed/FPS test includes the time of post-processing with no jit/data precisi
      
     # run the simple inference script
     python efficientdet_test.py
-
-## Training
-
-Training EfficientDet is a painful and time-consuming task. You shouldn't expect to get a good result within a day or two. Please be patient.
-
-Check out this [tutorial](tutorial/train_shape.ipynb) if you are new to this. You can run it on colab with GPU support.
-
-### 1. Prepare your dataset
-
-    # your dataset structure should be like this
-    datasets/
-        -your_project_name/
-            -train_set_name/
-                -*.jpg
-            -val_set_name/
-                -*.jpg
-            -annotations
-                -instances_{train_set_name}.json
-                -instances_{val_set_name}.json
-    
-    # for example, coco2017
-    datasets/
-        -coco2017/
-            -train2017/
-                -000000000001.jpg
-                -000000000002.jpg
-                -000000000003.jpg
-            -val2017/
-                -000000000004.jpg
-                -000000000005.jpg
-                -000000000006.jpg
-            -annotations
-                -instances_train2017.json
-                -instances_val2017.json
-
-### 2. Manual set project's specific parameters
-
-    # create a yml file {your_project_name}.yml under 'projects'folder 
-    # modify it following 'coco.yml'
-     
-    # for example
-    project_name: coco
-    train_set: train2017
-    val_set: val2017
-    num_gpus: 4  # 0 means using cpu, 1-N means using gpus 
-    
-    # mean and std in RGB order, actually this part should remain unchanged as long as your dataset is similar to coco.
-    mean: [0.485, 0.456, 0.406]
-    std: [0.229, 0.224, 0.225]
-    
-    # this is coco anchors, change it if necessary
-    anchors_scales: '[2 ** 0, 2 ** (1.0 / 3.0), 2 ** (2.0 / 3.0)]'
-    anchors_ratios: '[(1.0, 1.0), (1.4, 0.7), (0.7, 1.4)]'
-    
-    # objects from all labels from your dataset with the order from your annotations.
-    # its index must match your dataset's category_id.
-    # category_id is one_indexed,
-    # for example, index of 'car' here is 2, while category_id of is 3
-    obj_list: ['person', 'bicycle', 'car', ...]
-
-### 3.a. Train on coco from scratch(not necessary)
-
-    # train efficientdet-d0 on coco from scratch 
-    # with batchsize 12
-    # This takes time and requires change 
-    # of hyperparameters every few hours.
-    # If you have months to kill, do it. 
-    # It's not like someone going to achieve
-    # better score than the one in the paper.
-    # The first few epoches will be rather unstable,
-    # it's quite normal when you train from scratch.
-    
-    python train.py -c 0 --batch_size 64 --optim sgd --lr 8e-2
-
-### 3.b. Train a custom dataset from scratch
-
-    # train efficientdet-d1 on a custom dataset 
-    # with batchsize 8 and learning rate 1e-5
-    
-    python train.py -c 1 -p your_project_name --batch_size 8 --lr 1e-5
-
-### 3.c. Train a custom dataset with pretrained weights (Highly Recommended)
-
-    # train efficientdet-d2 on a custom dataset with pretrained weights
-    # with batchsize 8 and learning rate 1e-3 for 10 epoches
-    
-    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 --num_epochs 10 \
-     --load_weights /path/to/your/weights/efficientdet-d2.pth
-    
-    # with a coco-pretrained, you can even freeze the backbone and train heads only
-    # to speed up training and help convergence.
-    
-    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 --num_epochs 10 \
-     --load_weights /path/to/your/weights/efficientdet-d2.pth \
-     --head_only True
-
-### 4. Early stopping a training session
-
-    # while training, press Ctrl+c, the program will catch KeyboardInterrupt
-    # and stop training, save current checkpoint.
-
-### 5. Resume training
-
-    # let says you started a training session like this.
-    
-    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 \
-     --load_weights /path/to/your/weights/efficientdet-d2.pth \
-     --head_only True
-     
-    # then you stopped it with a Ctrl+c, it exited with a checkpoint
-    
-    # now you want to resume training from the last checkpoint
-    # simply set load_weights to 'last'
-    
-    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 \
-     --load_weights last \
-     --head_only True
-
-### 6. Evaluate model performance
-
-    # eval on your_project, efficientdet-d5
-    
-    python coco_eval.py -p your_project_name -c 5 \
-     -w /path/to/your/weights
-
-### 7. Debug training (optional)
-
-    # when you get bad result, you need to debug the training result.
-    python train.py -c 2 -p your_project_name --batch_size 8 --lr 1e-3 --debug True
-    
-    # then checkout test/ folder, there you can visualize the predicted boxes during training
-    # don't panic if you see countless of error boxes, it happens when the training is at early stage.
-    # But if you still can't see a normal box after several epoches, not even one in all image,
-    # then it's possible that either the anchors config is inappropriate or the ground truth is corrupted.
 
 ## TODO
 

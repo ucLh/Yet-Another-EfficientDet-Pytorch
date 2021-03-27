@@ -59,6 +59,7 @@ def get_args():
     parser.add_argument('--debug', type=boolean_string, default=False,
                         help='whether visualize the predicted boxes of training, '
                              'the output images will be in test/')
+    parser.add_argument('--use_coco_classes', action="store_true", help='If specified, uses coco classes')
 
     args = parser.parse_args()
     return args
@@ -83,6 +84,10 @@ class ModelWithLoss(nn.Module):
 
 def train(opt):
     params = Params(f'projects/{opt.project}.yml')
+    if opt.use_coco_classes:
+        obj_list = params.obj_list_coco
+    else:
+        obj_list = params.obj_list
 
     if params.num_gpus == 0:
         os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
@@ -121,7 +126,7 @@ def train(opt):
                                                         Resizer(input_sizes[opt.compound_coef])]))
     val_generator = DataLoader(val_set, **val_params)
 
-    model = EfficientDetBackbone(num_classes=len(params.obj_list), compound_coef=opt.compound_coef,
+    model = EfficientDetBackbone(num_classes=len(obj_list), compound_coef=opt.compound_coef,
                                  ratios=eval(params.anchors_ratios), scales=eval(params.anchors_scales))
 
     # load last weights
@@ -225,7 +230,7 @@ def train(opt):
                         annot = annot.cuda()
 
                     # optimizer.zero_grad()
-                    cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
+                    cls_loss, reg_loss = model(imgs, annot, obj_list=obj_list)
                     cls_loss = cls_loss.mean()
                     reg_loss = reg_loss.mean()
 
@@ -280,7 +285,7 @@ def train(opt):
                             imgs = imgs.cuda()
                             annot = annot.cuda()
 
-                        cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
+                        cls_loss, reg_loss = model(imgs, annot, obj_list=obj_list)
                         cls_loss = cls_loss.mean()
                         reg_loss = reg_loss.mean()
 
