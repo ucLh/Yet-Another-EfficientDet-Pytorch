@@ -76,6 +76,19 @@ def preprocess(*image_path, max_size=512, mean=(0.485, 0.456, 0.406), std=(0.229
     return ori_imgs, framed_imgs, framed_metas
 
 
+def preprocess_(*image_path, max_size=512, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+    ori_imgs = [cv2.imread(img_path) for img_path in image_path]
+    rgb_imgs = [cv2.cvtColor(img, cv2.COLOR_BGR2RGB) for img in ori_imgs]
+    normalized_imgs = [img / 255 for img in rgb_imgs]
+    # imgs_meta = [aspectaware_resize_padding(img, max_size, max_size,
+    #                                         means=None) for img in normalized_imgs]
+    imgs_meta = [cv2.resize(img, (max_size, max_size)) for img in normalized_imgs]
+    framed_imgs = [img_meta for img_meta in imgs_meta]
+    framed_metas = [[512, 512, 676, 380, 0, 0] for _ in imgs_meta]
+
+    return ori_imgs, imgs_meta, framed_metas
+
+
 def preprocess_video(*frame_from_video, max_size=512, mean=(0.406, 0.456, 0.485), std=(0.225, 0.224, 0.229)):
     ori_imgs = frame_from_video
     normalized_imgs = [(img[..., ::-1] / 255 - mean) / std for img in ori_imgs]

@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 
-import albumentations as albu
+import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2, ToTensor
 from torch.utils.data import Dataset, DataLoader
 from pycocotools.coco import COCO
@@ -10,7 +10,7 @@ import cv2
 
 
 class CocoDataset(Dataset):
-    def __init__(self, root_dir, phase, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), set='train2017',
+    def __init__(self, root_dir, phase, transforms, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), set='train2017',
                  transform=None):
 
         self.root_dir = root_dir
@@ -19,9 +19,11 @@ class CocoDataset(Dataset):
 
         self.coco = COCO(os.path.join(self.root_dir, 'annotations', 'instances_' + self.set_name + '.json'))
         self.image_ids = self.get_image_ids()
-        self.augmentation = get_transforms(phase, mean, std)
+        # self.augmentation = get_transforms(phase, mean, std)
         self.mean = mean
         self.std = std
+        self.transforms = transforms
+        self.test = (phase == 'val')
 
         self.load_classes()
 
@@ -74,41 +76,42 @@ class CocoDataset(Dataset):
     def __len__(self):
         return len(self.image_ids)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, index):
 
-        img = self.load_image(idx)
-        annot = self.load_annotations(idx)
+        image = self.load_image(index)
+        boxes = self.load_annotations(index)
 
-        params = {'image': img,
-                  'bboxes': annot}
-        # sample = {'img': img, 'annot': annot}
-        # if self.transform:
-        #     sample = self.transform(sample)
+        # there is only one class
+        labels = torch.zeros((boxes.shape[0],), dtype=torch.int64)
 
-        sample = self.augmentation(**params)
-        image, annot = sample['image'], sample['bboxes']
+        target = {}
+        target['boxes'] = boxes
+        target['labels'] = labels
+        target['image_id'] = torch.tensor([index])
 
-        image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        pt1, pt2 = annot[0][:2], annot[0][2:4]
-        pt1 = tuple(map(int, pt1))
-        pt2 = tuple(map(int, pt2))
-        cv2.rectangle(image_copy, pt1, pt2, (255, 255, 255), 1)
-        cv2.imwrite('temp.jpg', image_copy)
+        if self.transforms:
+            for i in range(10):
+                sample = self.transforms(**{
+                    'image': image,
+                    'bboxes': target['boxes'],
+                    'labels': labels
+                })
+                if len(sample['bboxes']) > 0:
+                    image = sample['image']
+                    target['boxes'] = torch.stack(tuple(map(torch.tensor, zip(*sample['bboxes'])))).permute(1, 0)
+                    # target['boxes'] = sample['bboxes']
+                    break
 
-        image = self.get_mean(image)
-
-
-        # image = image.permute(2, 0, 1)
-
-        return image, annot
+        return image, target['boxes']
 
     def load_image(self, image_index):
         image_info = self.coco.loadImgs(self.image_ids[image_index])[0]
         path = os.path.join(self.root_dir, self.set_name, image_info['file_name'])
         img = cv2.imread(path)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
+        img /= 255.0
 
-        return img.astype(np.float32)
+        return img
 
     def load_annotations(self, image_index):
         # get ground truth annotations
@@ -133,137 +136,52 @@ class CocoDataset(Dataset):
             annotations = np.append(annotations, annotation, axis=0)
 
         # transform from [x, y, w, h] to [x1, y1, x2, y2]
-        annotations[:, 2] = annotations[:, 0] + annotations[:, 2] - 1
+        annotations[:, 2] = annotations[:, 0] + annotations[:, 2] - 0.1
         annotations[:, 3] = annotations[:, 1] + annotations[:, 3]
 
         return annotations
 
 
-def collater(data):
-    imgs, annots = [], []
-    for entry in data:
-        imgs.append(entry[0])
-        annots.append(torch.from_numpy(np.asarray(entry[1])))
-    # imgs = [s['image'] for s in data]
-    # annots = [s['bboxes'] for s in data]
-    # scales = [s['scale'] for s in data]
-
-    imgs = torch.from_numpy(np.stack(imgs, axis=0)).float()
-    # imgs = torch.stack(imgs)
-
-    max_num_annots = max(annot.shape[0] for annot in annots)
-
-    if max_num_annots > 0:
-
-        annot_padded = torch.ones((len(annots), max_num_annots, 5)) * -1
-
-        for idx, annot in enumerate(annots):
-            if annot.shape[0] > 0:
-                annot_padded[idx, :annot.shape[0], :] = annot
-    else:
-        annot_padded = torch.ones((len(annots), 1, 5)) * -1
-
-    imgs = imgs.permute(0, 3, 1, 2)
-
-    return {'image': imgs, 'bboxes': annot_padded}
-
-
-class Resizer(object):
-    """Convert ndarrays in sample to Tensors."""
-
-    def __init__(self, img_size=512):
-        self.img_size = img_size
-
-    def __call__(self, sample):
-        image, annots = sample['img'], sample['annot']
-        height, width, _ = image.shape
-        if height > width:
-            scale = self.img_size / height
-            resized_height = self.img_size
-            resized_width = int(width * scale)
-        else:
-            scale = self.img_size / width
-            resized_height = int(height * scale)
-            resized_width = self.img_size
-
-        image = cv2.resize(image, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
-
-        new_image = np.zeros((self.img_size, self.img_size, 3))
-        new_image[0:resized_height, 0:resized_width] = image
-
-        annots[:, :4] *= scale
-
-        return {'img': torch.from_numpy(new_image).to(torch.float32), 'annot': torch.from_numpy(annots), 'scale': scale}
-
-
-class Augmenter(object):
-    """Convert ndarrays in sample to Tensors."""
-
-    def __call__(self, sample, flip_x=0.5):
-        if np.random.rand() < flip_x:
-            image, annots = sample['img'], sample['annot']
-            image = image[:, ::-1, :]
-
-            rows, cols, channels = image.shape
-
-            x1 = annots[:, 0].copy()
-            x2 = annots[:, 2].copy()
-
-            x_tmp = x1.copy()
-
-            annots[:, 0] = cols - x2
-            annots[:, 2] = cols - x_tmp
-
-            sample = {'img': image, 'annot': annots}
-
-        return sample
-
-
-class Normalizer(object):
-
-    def __init__(self, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-        self.mean = np.array([[mean]])
-        self.std = np.array([[std]])
-
-    def __call__(self, sample):
-        image, annots = sample['img'], sample['annot']
-
-        return {'image': ((image.astype(np.float32) - self.mean) / self.std), 'bboxes': annots}
-
-
-def get_transforms(phase, mean, std):
-    list_transforms = list()
-    if phase == "train":
-        list_transforms.extend(
-            [
-                # albu.CoarseDropout(4, 32, 32),
-                # albu.RandomSizedBBoxSafeCrop(512, 512, erosion_rate=0.0, interpolation=1, p=1.0),
-                # albu.Resize(256, 512, interpolation=1, p=1),
-                # albu.CoarseDropout(4, 16, 16),
-                albu.HorizontalFlip(p=0.5),
-                albu.RandomBrightness(p=1.0),
-                # albu.Resize(512, 512, interpolation=1, p=1),
-
-                # albu.OneOf([albu.RandomContrast(),
-                #             # albu.RandomGamma(),
-                #             albu.RandomBrightness()], p=1.0),
-                # albu.CLAHE(p=1.0)
-            ]
+def get_train_transforms():
+    return A.Compose(
+        [
+            # A.RandomSizedCrop(min_max_height=(380, 676), height=1024, width=1024, p=0.5),
+            A.RandomSizedBBoxSafeCrop(512, 512, erosion_rate=0.0, interpolation=1, p=0.5),
+            # A.OneOf([
+            #     A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit= 0.2,
+            #                          val_shift_limit=0.2, p=0.9),
+            #     A.RandomBrightnessContrast(brightness_limit=0.2,
+            #                                contrast_limit=0.2, p=0.9),
+            # ], p=0.9),
+            A.ToGray(p=0.01),
+            A.HorizontalFlip(p=0.5),
+            # A.VerticalFlip(p=0.5),
+            A.Resize(height=512, width=512, p=1),
+            A.Cutout(num_holes=4, max_h_size=64, max_w_size=64, fill_value=0, p=0.5),
+            A.Normalize(p=1),
+            ToTensorV2(p=1.0),
+        ],
+        p=1.0,
+        bbox_params=A.BboxParams(
+            format='pascal_voc',
+            min_area=0,
+            min_visibility=0,
+            label_fields=['labels']
         )
-    if phase == "val":
-        list_transforms.extend(
-            [
-                albu.Resize(512, 512, interpolation=1, p=1),
-            ]
-        )
-    # list_transforms.extend(
-    #     [
-    #         albu.Normalize(mean=mean, std=std, p=1),
-    #         ToTensorV2(),
-    #     ]
-    # )
-    list_trfms = albu.Compose(list_transforms,
-                              bbox_params=albu.BboxParams(format='pascal_voc'))
-    return list_trfms
+    )
 
-# class AlbumentationsDataset(Dataset)
+def get_valid_transforms():
+    return A.Compose(
+        [
+            A.Resize(height=512, width=512, p=1.0),
+            A.Normalize(p=1),
+            ToTensorV2(p=1.0),
+        ],
+        p=1.0,
+        bbox_params=A.BboxParams(
+            format='pascal_voc',
+            min_area=0,
+            min_visibility=0,
+            label_fields=['labels']
+        )
+    )

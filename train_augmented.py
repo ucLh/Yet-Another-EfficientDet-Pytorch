@@ -14,10 +14,11 @@ import yaml
 from tensorboardX import SummaryWriter
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from tqdm.autonotebook import tqdm
 
 from backbone import EfficientDetBackbone
-from efficientdet.dataset_augmented import CocoDataset, collater
+from efficientdet.dataset_augmented import CocoDataset, get_train_transforms, get_valid_transforms
 from efficientdet.loss import FocalLoss
 from utils.sync_batchnorm import patch_replication_callback
 from utils.utils import replace_w_sync_bn, CustomDataParallel, get_last_weights, init_weights, boolean_string
@@ -81,6 +82,25 @@ class ModelWithLoss(nn.Module):
         return cls_loss, reg_loss
 
 
+def collate_fn(batch):
+    return tuple(zip(*batch))
+
+
+def pad_annots(annots):
+    max_num_annots = max(annot.shape[0] for annot in annots)
+
+    if max_num_annots > 0:
+
+        annot_padded = torch.ones((len(annots), max_num_annots, 5)) * -1
+
+        for idx, annot in enumerate(annots):
+            if annot.shape[0] > 0:
+                annot_padded[idx, :annot.shape[0], :] = annot
+    else:
+        annot_padded = torch.ones((len(annots), 1, 5)) * -1
+    return annot_padded
+
+
 def train(opt):
     params = Params(f'projects/{opt.project}.yml')
 
@@ -97,25 +117,30 @@ def train(opt):
     os.makedirs(opt.log_path, exist_ok=True)
     os.makedirs(opt.saved_path, exist_ok=True)
 
-    training_params = {'batch_size': opt.batch_size,
-                       'shuffle': True,
-                       # 'drop_last': True,
-                       'collate_fn': collater,
-                       'num_workers': opt.num_workers}
-
-    val_params = {'batch_size': opt.batch_size,
-                  'shuffle': False,
-                  # 'drop_last': True,
-                  'collate_fn': collater,
-                  'num_workers': opt.num_workers}
-
     input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
     training_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.train_set,
-                               phase='train')
-    training_generator = DataLoader(training_set, **training_params)
+                               phase='train', transforms=get_train_transforms())
 
-    val_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.val_set, phase='val')
-    val_generator = DataLoader(val_set, **val_params)
+    val_set = CocoDataset(root_dir=os.path.join(opt.data_path, params.project_name), set=params.val_set, phase='val',
+                          transforms=get_valid_transforms())
+    training_generator = torch.utils.data.DataLoader(
+        training_set,
+        batch_size=opt.batch_size,
+        sampler=RandomSampler(training_set),
+        pin_memory=False,
+        drop_last=True,
+        num_workers=opt.num_workers,
+        collate_fn=collate_fn,
+    )
+    val_generator = torch.utils.data.DataLoader(
+        val_set,
+        batch_size=opt.batch_size,
+        num_workers=opt.num_workers,
+        shuffle=False,
+        sampler=SequentialSampler(val_set),
+        pin_memory=False,
+        collate_fn=collate_fn,
+    )
 
     model = EfficientDetBackbone(num_classes=len(params.obj_list), compound_coef=opt.compound_coef,
                                  ratios=eval(params.anchors_ratios), scales=eval(params.anchors_scales))
@@ -205,13 +230,14 @@ def train(opt):
 
             epoch_loss = []
             progress_bar = tqdm(training_generator)
-            for iter, data in enumerate(progress_bar):
+            for iter, (imgs, annots) in enumerate(progress_bar):
+                pass
                 if iter < step - last_epoch * num_iter_per_epoch:
                     progress_bar.update()
                     continue
                 try:
-                    imgs = data['image']
-                    annot = data['bboxes']
+                    imgs = torch.stack(imgs)
+                    annot = pad_annots(annots)
 
                     if params.num_gpus == 1:
                         # if only one gpu, just send it to cuda:0
@@ -267,10 +293,10 @@ def train(opt):
                 model.eval()
                 loss_regression_ls = []
                 loss_classification_ls = []
-                for iter, data in enumerate(val_generator):
+                for iter, (imgs, annots) in enumerate(val_generator):
                     with torch.no_grad():
-                        imgs = data['image']
-                        annot = data['bboxes']
+                        imgs = torch.stack(imgs)
+                        annot = pad_annots(annots)
 
                         if params.num_gpus == 1:
                             imgs = imgs.cuda()

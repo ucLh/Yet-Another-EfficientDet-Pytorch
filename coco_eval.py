@@ -22,7 +22,7 @@ from pycocotools.cocoeval import COCOeval
 
 from backbone import EfficientDetBackbone
 from efficientdet.utils import BBoxTransform, ClipBoxes
-from utils.utils import preprocess, invert_affine, postprocess, boolean_string
+from utils.utils import preprocess, preprocess_, invert_affine, postprocess, boolean_string
 
 ap = argparse.ArgumentParser()
 ap.add_argument('-p', '--project', type=str, default='detection_dataset', help='project file that contains parameters')
@@ -66,7 +66,7 @@ def evaluate_coco(img_path, set_name, image_ids, coco, model, threshold=0.05):
         image_info = coco.loadImgs(image_id)[0]
         image_path = img_path + image_info['file_name']
 
-        ori_imgs, framed_imgs, framed_metas = preprocess(image_path, max_size=input_sizes[compound_coef], mean=params['mean'], std=params['std'])
+        ori_imgs, framed_imgs, framed_metas = preprocess_(image_path, max_size=input_sizes[compound_coef], mean=params['mean'], std=params['std'])
         x = torch.from_numpy(framed_imgs[0])
 
         if use_cuda:
