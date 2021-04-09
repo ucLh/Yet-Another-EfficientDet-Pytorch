@@ -91,11 +91,10 @@ def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05
             "extra_info": {},
             "subdirs": ".",
             "id": i,
-            "width": 676,
-            "height": 380,
+            "width": 0,
+            "height": 0,
             "file_name": image_name,
         }
-        json_dict["images"].append(image_base_entry)
 
         image_path = os.path.join(input_path, image_name)
 
@@ -103,6 +102,9 @@ def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05
                                                          mean=params['mean'], std=params['std'])
         x = torch.from_numpy(framed_imgs[0])
         img = ori_imgs[0]
+        image_base_entry["width"] = img.shape[1]
+        image_base_entry["height"] = img.shape[0]
+        json_dict["images"].append(image_base_entry)
 
         if use_cuda:
             x = x.cuda(gpu)
@@ -145,9 +147,10 @@ def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05
                     "extra_info": {
                         "human_annotated": True
                     },
-                    "category_id": 3,
+                    "category_id": label + 1,
                     "iscrowd": 0,
                     "id": box_id_static,
+                    "score": float(score),
                     "bbox": box,
                     "area": area
                 }
@@ -167,6 +170,7 @@ def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05
 
 if __name__ == '__main__':
     image_names = os.listdir(input_dir)
+    image_names = sorted(image_names)
 
     model = EfficientDetBackbone(compound_coef=compound_coef, num_classes=len(obj_list),
                                  ratios=eval(params['anchors_ratios']), scales=eval(params['anchors_scales']))
