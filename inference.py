@@ -57,6 +57,10 @@ else:
 input_sizes = [512, 640, 768, 896, 1024, 1280, 1280, 1536, 1536]
 
 
+def make_csv_entry(image_name, box, score):
+    return f'{image_name},{box[0]},{box[1]},{box[2]},{box[3]},{score}\n'
+
+
 def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05):
     box_id_static = 1
     json_dict = {
@@ -85,87 +89,92 @@ def inference(input_path, save_dir, image_names, obj_list, model, threshold=0.05
 
     json_save_dir = os.path.dirname(json_save_path)
     Path(json_save_dir).mkdir(parents=True, exist_ok=True)
+    csv_save_path = os.path.basename(json_save_path).split('.')[0] + '.csv'
 
-    for i, image_name in tqdm(enumerate(image_names)):
-        image_base_entry = {
-            "extra_info": {},
-            "subdirs": ".",
-            "id": i,
-            "width": 0,
-            "height": 0,
-            "file_name": image_name,
-        }
+    with open(csv_save_path, 'w') as csv_file:
+        csv_file.write('image,xmin,ymin,w,h,score\n')
+        for i, image_name in tqdm(enumerate(image_names)):
+            image_base_entry = {
+                "extra_info": {},
+                "subdirs": ".",
+                "id": i,
+                "width": 0,
+                "height": 0,
+                "file_name": image_name,
+            }
 
-        image_path = os.path.join(input_path, image_name)
+            image_path = os.path.join(input_path, image_name)
 
-        ori_imgs, framed_imgs, framed_metas = preprocess(image_path, max_size=input_sizes[compound_coef],
-                                                         mean=params['mean'], std=params['std'])
-        x = torch.from_numpy(framed_imgs[0])
-        img = ori_imgs[0]
-        image_base_entry["width"] = img.shape[1]
-        image_base_entry["height"] = img.shape[0]
-        json_dict["images"].append(image_base_entry)
+            ori_imgs, framed_imgs, framed_metas = preprocess(image_path, max_size=input_sizes[compound_coef],
+                                                             mean=params['mean'], std=params['std'])
+            x = torch.from_numpy(framed_imgs[0])
+            img = ori_imgs[0]
+            image_base_entry["width"] = img.shape[1]
+            image_base_entry["height"] = img.shape[0]
+            json_dict["images"].append(image_base_entry)
 
-        if use_cuda:
-            x = x.cuda(gpu)
-        x = x.float()
+            if use_cuda:
+                x = x.cuda(gpu)
+            x = x.float()
 
-        x = x.unsqueeze(0).permute(0, 3, 1, 2)
-        features, regression, classification, anchors = model(x)
+            x = x.unsqueeze(0).permute(0, 3, 1, 2)
+            features, regression, classification, anchors = model(x)
 
-        preds = postprocess(x,
-                            anchors, regression, classification,
-                            regressBoxes, clipBoxes,
-                            threshold, nms_threshold)
+            preds = postprocess(x,
+                                anchors, regression, classification,
+                                regressBoxes, clipBoxes,
+                                threshold, nms_threshold)
 
-        if not preds:
-            continue
+            if not preds:
+                continue
 
-        preds = invert_affine(framed_metas, preds)[0]
+            preds = invert_affine(framed_metas, preds)[0]
 
-        scores = preds['scores']
-        class_ids = preds['class_ids']
-        rois = preds['rois']
+            scores = preds['scores']
+            class_ids = preds['class_ids']
+            rois = preds['rois']
 
-        if rois.shape[0] > 0:
-            bbox_score = scores
+            if rois.shape[0] > 0:
+                bbox_score = scores
 
-            for roi_id in range(rois.shape[0]):
-                score = float(bbox_score[roi_id])
-                if score < conf_threshold:
-                    continue
-                label = int(class_ids[roi_id])
-                x0, y0, x1, y1 = list(map(int, rois[roi_id, :]))
-                box = [x0, y0, x1 - x0, y1 - y0]
-                area = int(box[2] * box[3])
-                if visualise:
-                    img = cv2.rectangle(img, (x0, y0), (x1, y1), (255, 255, 255), 1)
-                    cv2.putText(img, obj_list[label], (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
+                for roi_id in range(rois.shape[0]):
+                    score = float(bbox_score[roi_id])
+                    if score < conf_threshold:
+                        continue
+                    label = int(class_ids[roi_id])
+                    x0, y0, x1, y1 = list(map(int, rois[roi_id, :]))
+                    box = [x0, y0, x1 - x0, y1 - y0]
+                    area = int(box[2] * box[3])
+                    if visualise:
+                        img = cv2.rectangle(img, (x0, y0), (x1, y1), (255, 255, 255), 1)
+                        cv2.putText(img, obj_list[label], (x0, y0), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 1)
 
-                bbox_base_entry = {
-                    "image_id": i,
-                    "extra_info": {
-                        "human_annotated": True
-                    },
-                    "category_id": label + 1,
-                    "iscrowd": 0,
-                    "id": box_id_static,
-                    "score": float(score),
-                    "bbox": box,
-                    "area": area
-                }
-                box_id_static += 1
+                    bbox_base_entry = {
+                        "image_id": i,
+                        "extra_info": {
+                            "human_annotated": True
+                        },
+                        "category_id": label + 1,
+                        "iscrowd": 0,
+                        "id": box_id_static,
+                        "score": float(score),
+                        "bbox": box,
+                        "area": area
+                    }
+                    box_id_static += 1
 
-                json_dict["annotations"].append(bbox_base_entry)
-        if visualise:
-            Path(save_dir).mkdir(parents=True, exist_ok=True)
-            save_path = os.path.join(save_dir, image_name)
-            cv2.imwrite(save_path, img)
+                    json_dict["annotations"].append(bbox_base_entry)
+                    csv_entry = make_csv_entry(image_name, box, score)
+                    csv_file.write(csv_entry)
+            if visualise:
+                Path(save_dir).mkdir(parents=True, exist_ok=True)
+                save_path = os.path.join(save_dir, image_name)
+                cv2.imwrite(save_path, img)
 
-        if i % 1000 == 0:
-            json.dump(json_dict, open(json_save_path, 'w'), indent=4)
+            if i % 1000 == 0:
+                json.dump(json_dict, open(json_save_path, 'w'), indent=4)
 
-    json.dump(json_dict, open(json_save_path, 'w'), indent=4)
+        json.dump(json_dict, open(json_save_path, 'w'), indent=4)
 
 
 if __name__ == '__main__':
