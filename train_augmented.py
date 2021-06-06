@@ -36,18 +36,18 @@ def get_args():
     parser = argparse.ArgumentParser('Yet Another EfficientDet Pytorch: SOTA object detection network - Zylo117')
     parser.add_argument('-p', '--project', type=str, default='coco', help='project file that contains parameters')
     parser.add_argument('-c', '--compound_coef', type=int, default=0, help='coefficients of efficientdet')
-    parser.add_argument('-n', '--num_workers', type=int, default=4, help='num_workers of dataloader')
-    parser.add_argument('--batch_size', type=int, default=12, help='The number of images per batch among all devices')
+    parser.add_argument('-n', '--num_workers', type=int, default=12, help='num_workers of dataloader')
+    parser.add_argument('--batch_size', type=int, default=4, help='The number of images per batch among all devices')
     parser.add_argument('--head_only', type=boolean_string, default=False,
                         help='whether finetunes only the regressor and the classifier, '
                              'useful in early stage convergence or small/easy dataset')
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--optim', type=str, default='adamw', help='select optimizer for training, '
                                                                    'suggest using \'admaw\' until the'
                                                                    ' very final stage then switch to \'sgd\'')
     parser.add_argument('--num_epochs', type=int, default=50)
     parser.add_argument('--val_interval', type=int, default=1, help='Number of epoches between valing phases')
-    parser.add_argument('--save_interval', type=int, default=500, help='Number of steps between saving')
+    parser.add_argument('--save_interval', type=int, default=2000, help='Number of steps between saving')
     parser.add_argument('--es_min_delta', type=float, default=0.0,
                         help='Early stopping\'s parameter: minimum change loss to qualify as an improvement')
     parser.add_argument('--es_patience', type=int, default=0,
@@ -134,7 +134,7 @@ def train(opt):
     )
     val_generator = torch.utils.data.DataLoader(
         val_set,
-        batch_size=opt.batch_size,
+        batch_size=1,
         num_workers=opt.num_workers,
         shuffle=False,
         sampler=SequentialSampler(val_set),
@@ -211,7 +211,7 @@ def train(opt):
     else:
         optimizer = torch.optim.SGD(model.parameters(), opt.lr, momentum=0.9, nesterov=True)
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, verbose=True)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=1000, verbose=True)
 
     epoch = 0
     best_loss = 1e5
@@ -284,8 +284,8 @@ def train(opt):
                         print('checkpoint...')
 
                 except Exception as e:
-                    print('[Error]', traceback.format_exc())
-                    print(e)
+                    # print('[Error]', traceback.format_exc())
+                    # print(e)
                     continue
             scheduler.step(np.mean(epoch_loss))
 
@@ -294,24 +294,29 @@ def train(opt):
                 loss_regression_ls = []
                 loss_classification_ls = []
                 for iter, (imgs, annots) in enumerate(val_generator):
-                    with torch.no_grad():
-                        imgs = torch.stack(imgs)
-                        annot = pad_annots(annots)
+                    try:
+                        with torch.no_grad():
+                            imgs = torch.stack(imgs)
+                            annot = pad_annots(annots)
 
-                        if params.num_gpus == 1:
-                            imgs = imgs.cuda()
-                            annot = annot.cuda()
+                            if params.num_gpus == 1:
+                                imgs = imgs.cuda()
+                                annot = annot.cuda()
 
-                        cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
-                        cls_loss = cls_loss.mean()
-                        reg_loss = reg_loss.mean()
+                            cls_loss, reg_loss = model(imgs, annot, obj_list=params.obj_list)
+                            cls_loss = cls_loss.mean()
+                            reg_loss = reg_loss.mean()
 
-                        loss = cls_loss + reg_loss
-                        if loss == 0 or not torch.isfinite(loss):
-                            continue
+                            loss = cls_loss + reg_loss
+                            if loss == 0 or not torch.isfinite(loss):
+                                continue
 
-                        loss_classification_ls.append(cls_loss.item())
-                        loss_regression_ls.append(reg_loss.item())
+                            loss_classification_ls.append(cls_loss.item())
+                            loss_regression_ls.append(reg_loss.item())
+                    except Exception as e:
+                        # print('[Error]', traceback.format_exc())
+                        # print(e)
+                        continue
 
                 cls_loss = np.mean(loss_classification_ls)
                 reg_loss = np.mean(loss_regression_ls)
