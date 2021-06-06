@@ -84,7 +84,8 @@ def preprocess_(*image_path, max_size=512, mean=(0.485, 0.456, 0.406), std=(0.22
     #                                         means=None) for img in normalized_imgs]
     imgs_meta = [cv2.resize(img, (max_size, max_size)) for img in normalized_imgs]
     framed_imgs = [img_meta for img_meta in imgs_meta]
-    framed_metas = [[512, 512, 676, 380, 0, 0] for _ in imgs_meta]
+    # framed_metas = [[512, 512, 676, 380, 0, 0] for _ in imgs_meta]
+    framed_metas = [[640, 640, 608, 608, 0, 0] for _ in imgs_meta]
 
     return ori_imgs, imgs_meta, framed_metas
 
