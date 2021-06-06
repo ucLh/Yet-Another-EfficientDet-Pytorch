@@ -25,10 +25,11 @@ from efficientdet.utils import BBoxTransform, ClipBoxes
 from utils.utils import preprocess, preprocess_, invert_affine, postprocess, boolean_string
 
 ap = argparse.ArgumentParser()
-ap.add_argument('-p', '--project', type=str, default='detection_dataset', help='project file that contains parameters')
-ap.add_argument('-c', '--compound_coef', type=int, default=0, help='coefficients of efficientdet')
-ap.add_argument('-w', '--weights', type=str, default='weights/efficientdet-d0.pth', help='/path/to/weights')
+ap.add_argument('-p', '--project', type=str, default='trash', help='project file that contains parameters')
+ap.add_argument('-c', '--compound_coef', type=int, default=1, help='coefficients of efficientdet')
+ap.add_argument('-w', '--weights', type=str, default='logs/trash/efficientdet-d1_recall_746.pth', help='/path/to/weights')
 ap.add_argument('--nms_threshold', type=float, default=0.5, help='nms threshold, don\'t change it if not for testing purposes')
+ap.add_argument('--conf', type=float, default=0.3, help='confidence threshold')
 ap.add_argument('--cuda', type=boolean_string, default=True)
 ap.add_argument('--device', type=int, default=0)
 ap.add_argument('--float16', type=boolean_string, default=False)
@@ -38,6 +39,7 @@ args = ap.parse_args()
 
 compound_coef = args.compound_coef
 nms_threshold = args.nms_threshold
+confidence_threshold = args.conf
 use_cuda = args.cuda
 gpu = args.device
 use_float16 = args.float16
@@ -104,7 +106,7 @@ def evaluate_coco(img_path, set_name, image_ids, coco, model, threshold=0.05):
 
             for roi_id in range(rois.shape[0]):
                 score = float(bbox_score[roi_id])
-                if score < 0.4:
+                if score < confidence_threshold:
                     continue
                 label = int(class_ids[roi_id])
                 box = rois[roi_id, :]
